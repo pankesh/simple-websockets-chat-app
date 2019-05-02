@@ -1,18 +1,16 @@
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-const AWS = require('aws-sdk');
-
-// Add ApiGatewayManagementApi to the AWS namespace
-require('aws-sdk/clients/apigatewaymanagementapi');
+const AWS = require('aws-sdk'); // aws-sdk v2.290.0 provided by AWS
 
 const ddb = new AWS.DynamoDB.DocumentClient({ apiVersion: '2012-08-10' });
+require('./patch.js');
 
 const { TABLE_NAME } = process.env;
 
 exports.handler = async (event, context) => {
   let connectionData;
-  
+  console.log(`Called for ${event.requestContext.domainName}/${event.requestContext.stage}`);
   try {
     connectionData = await ddb.scan({ TableName: TABLE_NAME, ProjectionExpression: 'connectionId' }).promise();
   } catch (e) {
@@ -25,9 +23,11 @@ exports.handler = async (event, context) => {
   });
   
   const postData = JSON.parse(event.body).data;
-  
+  console.log(`with data [${postData}]`);
+
   const postCalls = connectionData.Items.map(async ({ connectionId }) => {
     try {
+      console.log(`sending client with connectionId [${connectionId}] data [${postData}]`);
       await apigwManagementApi.postToConnection({ ConnectionId: connectionId, Data: postData }).promise();
     } catch (e) {
       if (e.statusCode === 410) {
