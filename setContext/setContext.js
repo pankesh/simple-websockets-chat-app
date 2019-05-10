@@ -6,10 +6,14 @@ AWS.config.update({ region: process.env.AWS_REGION });
 var DDB = new AWS.DynamoDB({ apiVersion: "2012-10-08" });
 
 exports.handler = function (event, context, callback) {
+
+  const contextData = JSON.parse(event.body).context;
+
   var putParams = {
     TableName: process.env.TABLE_NAME,
     Item: {
-      connectionId: { S: event.requestContext.connectionId }
+      connectionId: { S: event.requestContext.connectionId },
+      imeiIccid: {S: contextData}
     }
   };
 

@@ -7,9 +7,9 @@ Description: >
   functions needed to demonstrate the Websocket protocol on API Gateway.
 
 Parameters:
-  TableName:
+  WebsocketConnectionContextTableName:
     Type: String
-    Default: 'websocket_connections'
+    Default: 'websocket_connections_context'
     Description: (Required) The name of the new DynamoDB to store connection identifiers for each connected clients. Minimum 3 characters
     MinLength: 3
     MaxLength: 50
@@ -19,8 +19,8 @@ Parameters:
 Resources:
   WebsocketLambdaPoc:
     Type: AWS::ApiGatewayV2::Api
-    Description: DO NOT DELETE. WebsocketLambda PoC - pankesh
     Properties:
+      Description: DO NOT DELETE. WebsocketLambda PoC - pankesh
       Name: WebsocketLambdaPoc
       ProtocolType: WEBSOCKET
       RouteSelectionExpression: "$request.body.action"
@@ -84,11 +84,32 @@ Resources:
       IntegrationUri: 
         Fn::Sub:
             arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SendMessageFunction.Arn}/invocations
+  SetContextRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebsocketLambdaPoc
+      RouteKey: setContext
+      AuthorizationType: NONE
+      OperationName: SetContextRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref SetContextInteg
+  SetContextInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebsocketLambdaPoc
+      Description: Set Context Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: 
+        Fn::Sub:
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SetContextFunction.Arn}/invocations
   Deployment:
     Type: AWS::ApiGatewayV2::Deployment
     DependsOn:
     - ConnectRoute
     - SendRoute
+    - SetContextRoute
     - DisconnectRoute
     Properties:
       ApiId: !Ref WebsocketLambdaPoc
@@ -103,31 +124,43 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       AttributeDefinitions:
-      - AttributeName: "connectionId"
-        AttributeType: "S"
+      - AttributeName: connectionId
+        AttributeType: S
+      - AttributeName: imeiIccid
+        AttributeType: S
       KeySchema:
-      - AttributeName: "connectionId"
-        KeyType: "HASH"
+      - AttributeName: connectionId
+        KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ImeiIccidIndex
+          KeySchema:
+            - AttributeName: imeiIccid
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
       ProvisionedThroughput:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
       SSESpecification:
         SSEEnabled: True
-      TableName: !Ref TableName
+      TableName: !Ref WebsocketConnectionContextTableName
   OnConnectFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: onconnect/
-      Handler: app.handler
+      Handler: onConnect.handler
       MemorySize: 256
       Runtime: nodejs8.10
       Role: arn:aws:iam::357152438496:role/OneCloud/WebsocketLambdaMicroserviceIntegrationPoCRole
       Environment:
         Variables:
-          TABLE_NAME: !Ref TableName
+          TABLE_NAME: !Ref WebsocketConnectionContextTableName
       Policies:
       - DynamoDBCrudPolicy:
-          TableName: !Ref TableName
+          TableName: !Ref WebsocketConnectionContextTableName
   OnConnectPermission:
     Type: AWS::Lambda::Permission
     DependsOn:
@@ -141,16 +174,16 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ondisconnect/
-      Handler: app.handler
+      Handler: onDisconnect.handler
       MemorySize: 256
       Runtime: nodejs8.10
       Role: arn:aws:iam::357152438496:role/OneCloud/WebsocketLambdaMicroserviceIntegrationPoCRole
       Environment:
         Variables:
-          TABLE_NAME: !Ref TableName
+          TABLE_NAME: !Ref WebsocketConnectionContextTableName
       Policies:
       - DynamoDBCrudPolicy:
-          TableName: !Ref TableName
+          TableName: !Ref WebsocketConnectionContextTableName
   OnDisconnectPermission:
     Type: AWS::Lambda::Permission
     DependsOn:
@@ -164,16 +197,16 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: sendmessage/
-      Handler: app.handler
+      Handler: sendMessage.handler
       MemorySize: 256
       Runtime: nodejs8.10
       Role: arn:aws:iam::357152438496:role/OneCloud/WebsocketLambdaMicroserviceIntegrationPoCRole
       Environment:
         Variables:
-          TABLE_NAME: !Ref TableName
+          TABLE_NAME: !Ref WebsocketConnectionContextTableName
       Policies:
       - DynamoDBCrudPolicy:
-          TableName: !Ref TableName
+          TableName: !Ref WebsocketConnectionContextTableName
       - Statement:
         - Effect: Allow
           Action:
@@ -188,6 +221,29 @@ Resources:
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref SendMessageFunction
+      Principal: apigateway.amazonaws.com
+  SetContextFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: setcontext/
+      Handler: setContext.handler
+      MemorySize: 256
+      Runtime: nodejs8.10
+      Role: arn:aws:iam::357152438496:role/OneCloud/WebsocketLambdaMicroserviceIntegrationPoCRole
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref WebsocketConnectionContextTableName
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: !Ref WebsocketConnectionContextTableName
+  SetContextPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - WebsocketLambdaPoc
+      - SetContextFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SetContextFunction
       Principal: apigateway.amazonaws.com
 
 Outputs:
@@ -206,6 +262,10 @@ Outputs:
   SendMessageFunctionArn:
     Description: "SendMessage function ARN"
     Value: !GetAtt SendMessageFunction.Arn
+
+  SetContextFunctionArn:
+    Description: "SetContext function ARN"
+    Value: !GetAtt SetContextFunction.Arn
 
   WebSocketURI:
     Description: "The WSS Protocol URI to connect to"
